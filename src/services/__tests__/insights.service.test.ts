@@ -134,3 +134,125 @@ describe("InsightsService.getProfitRanking", () => {
     expect(result.hasIntegrationActive).toBe(true);
   });
 });
+
+describe("InsightsService.getStaleProducts", () => {
+  // Helper para criar produto elegível
+  function makeProduct(
+    id: string,
+    name: string,
+    sku: string,
+    stockQuantity: number,
+    costPrice: number,
+    daysOld = 60
+  ) {
+    return {
+      id,
+      name,
+      sku,
+      stockQuantity,
+      costPrice,
+      createdAt: new Date(Date.now() - daysOld * 24 * 60 * 60 * 1000),
+    };
+  }
+
+  it("classifica produto que nunca vendeu como NEVER_SOLD", async () => {
+    mockedPrisma.product.findMany.mockResolvedValue([
+      makeProduct("p1", "Nunca vendido", "SKU1", 10, 50),
+    ]);
+    mockedPrisma.stockExit.groupBy
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    mockedPrisma.integrationConfig.count.mockResolvedValue(0);
+
+    const result = await InsightsService.getStaleProducts("tenant-1");
+
+    expect(result.hasData).toBe(true);
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0].reason).toBe("NEVER_SOLD");
+    expect(result.items[0].daysSinceLastSale).toBeNull();
+    expect(result.items[0].stockValue).toBe(10 * 50);
+  });
+
+  it("classifica produto sem vendas há 70 dias como NO_SALES_60D", async () => {
+    const seventyDaysAgo = new Date(Date.now() - 70 * 24 * 60 * 60 * 1000);
+    mockedPrisma.product.findMany.mockResolvedValue([
+      makeProduct("p1", "Velho", "SKU1", 5, 30),
+    ]);
+    mockedPrisma.stockExit.groupBy
+      .mockResolvedValueOnce([{ productId: "p1", _max: { exitDate: seventyDaysAgo } }])
+      .mockResolvedValueOnce([]);
+    mockedPrisma.integrationConfig.count.mockResolvedValue(0);
+
+    const result = await InsightsService.getStaleProducts("tenant-1");
+
+    expect(result.items[0].reason).toBe("NO_SALES_60D");
+    expect(result.items[0].daysSinceLastSale).toBeGreaterThanOrEqual(70);
+  });
+
+  it("classifica produto com cobertura > 6 meses como HIGH_COVERAGE", async () => {
+    const tenDaysAgo = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000);
+    mockedPrisma.product.findMany.mockResolvedValue([
+      makeProduct("p1", "Devagar", "SKU1", 100, 10),
+    ]);
+    mockedPrisma.stockExit.groupBy
+      .mockResolvedValueOnce([{ productId: "p1", _max: { exitDate: tenDaysAgo } }])
+      .mockResolvedValueOnce([{ productId: "p1", _sum: { quantity: 3 } }]);
+    mockedPrisma.integrationConfig.count.mockResolvedValue(0);
+
+    const result = await InsightsService.getStaleProducts("tenant-1");
+
+    expect(result.items[0].reason).toBe("HIGH_COVERAGE");
+    expect(result.items[0].monthsOfCoverage).toBeGreaterThan(6);
+  });
+
+  it("ignora produtos com createdAt < 30 dias", async () => {
+    mockedPrisma.product.findMany.mockResolvedValue([]);
+    mockedPrisma.integrationConfig.count.mockResolvedValue(0);
+
+    const result = await InsightsService.getStaleProducts("tenant-1");
+
+    expect(result.hasData).toBe(false);
+    const callArg = mockedPrisma.product.findMany.mock.calls[0]![0] as {
+      where: { createdAt: { lt: Date } };
+    };
+    expect(callArg.where.createdAt.lt).toBeInstanceOf(Date);
+  });
+
+  it("ordena por criticidade: NEVER_SOLD > NO_SALES_60D > HIGH_COVERAGE", async () => {
+    const eightyDaysAgo = new Date(Date.now() - 80 * 24 * 60 * 60 * 1000);
+    const fiveDaysAgo = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000);
+
+    mockedPrisma.product.findMany.mockResolvedValue([
+      makeProduct("never", "Nunca", "SKU-N", 5, 10),
+      makeProduct("old", "Velho", "SKU-O", 3, 20),
+      makeProduct("slow", "Devagar", "SKU-S", 100, 5),
+    ]);
+    mockedPrisma.stockExit.groupBy
+      .mockResolvedValueOnce([
+        { productId: "old", _max: { exitDate: eightyDaysAgo } },
+        { productId: "slow", _max: { exitDate: fiveDaysAgo } },
+      ])
+      .mockResolvedValueOnce([
+        { productId: "slow", _sum: { quantity: 2 } },
+      ]);
+    mockedPrisma.integrationConfig.count.mockResolvedValue(0);
+
+    const result = await InsightsService.getStaleProducts("tenant-1");
+
+    expect(result.items.map((i) => i.productId)).toEqual(["never", "old", "slow"]);
+    expect(result.items.map((i) => i.reason)).toEqual([
+      "NEVER_SOLD",
+      "NO_SALES_60D",
+      "HIGH_COVERAGE",
+    ]);
+  });
+
+  it("retorna hasIntegrationActive=true quando há integração ativa", async () => {
+    mockedPrisma.product.findMany.mockResolvedValue([]);
+    mockedPrisma.integrationConfig.count.mockResolvedValue(1);
+
+    const result = await InsightsService.getStaleProducts("tenant-1");
+
+    expect(result.hasIntegrationActive).toBe(true);
+  });
+});

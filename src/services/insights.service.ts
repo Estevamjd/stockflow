@@ -105,7 +105,155 @@ export class InsightsService {
     };
   }
 
-  static async getStaleProducts(_tenantId: string): Promise<StaleProductsReport> {
-    throw new Error("not implemented");
+  static async getStaleProducts(tenantId: string): Promise<StaleProductsReport> {
+    const minAge = new Date(
+      Date.now() - INSIGHTS_THRESHOLDS.STALE_MIN_PRODUCT_AGE_DAYS * 24 * 60 * 60 * 1000
+    );
+
+    // Query 1: produtos elegíveis
+    const products = await prisma.product.findMany({
+      where: {
+        tenantId,
+        deletedAt: null,
+        status: "ACTIVE",
+        createdAt: { lt: minAge },
+      },
+      select: {
+        id: true,
+        name: true,
+        sku: true,
+        stockQuantity: true,
+        costPrice: true,
+        createdAt: true,
+      },
+    });
+
+    const hasIntegrationActive =
+      (await prisma.integrationConfig.count({
+        where: { tenantId, isActive: true, isMockMode: false },
+      })) > 0;
+
+    if (products.length === 0) {
+      return {
+        items: [],
+        totalCount: 0,
+        totalStockValue: 0,
+        hasIntegrationActive,
+        hasData: false,
+      };
+    }
+
+    const productIds = products.map((p) => p.id);
+
+    // Query 2: última venda por produto
+    const lastSales = await prisma.stockExit.groupBy({
+      by: ["productId"],
+      where: {
+        tenantId,
+        reason: "SALE",
+        productId: { in: productIds },
+      },
+      _max: { exitDate: true },
+    });
+
+    // Query 3: velocidade dos últimos 90 dias
+    const ninetyDaysAgo = new Date(
+      Date.now() - INSIGHTS_THRESHOLDS.STALE_VELOCITY_WINDOW_DAYS * 24 * 60 * 60 * 1000
+    );
+    const velocity90d = await prisma.stockExit.groupBy({
+      by: ["productId"],
+      where: {
+        tenantId,
+        reason: "SALE",
+        productId: { in: productIds },
+        exitDate: { gte: ninetyDaysAgo },
+      },
+      _sum: { quantity: true },
+    });
+
+    // Indexar para lookup rápido
+    const lastSaleMap = new Map<string, Date | null>();
+    for (const row of lastSales) {
+      lastSaleMap.set(row.productId, row._max.exitDate ?? null);
+    }
+    const velocityMap = new Map<string, number>();
+    for (const row of velocity90d) {
+      velocityMap.set(row.productId, Number(row._sum.quantity ?? 0));
+    }
+
+    const now = Date.now();
+    const stale = [] as Array<
+      StaleProductsReport["items"][number] & { _sortKey: number }
+    >;
+
+    for (const p of products) {
+      const lastSale = lastSaleMap.get(p.id) ?? null;
+      const v90 = velocityMap.get(p.id) ?? 0;
+      const velocityPerDay = v90 / INSIGHTS_THRESHOLDS.STALE_VELOCITY_WINDOW_DAYS;
+
+      let daysSinceLastSale: number | null = null;
+      if (lastSale) {
+        daysSinceLastSale = Math.floor(
+          (now - lastSale.getTime()) / (24 * 60 * 60 * 1000)
+        );
+      }
+
+      let monthsOfCoverage: number | null = null;
+      if (velocityPerDay > 0) {
+        monthsOfCoverage = p.stockQuantity / (velocityPerDay * 30);
+      }
+
+      let reason: "NEVER_SOLD" | "NO_SALES_60D" | "HIGH_COVERAGE" | null = null;
+      let sortKey = 0;
+
+      if (lastSale === null) {
+        // Nunca vendeu — só marca como parado se tem estoque
+        if (p.stockQuantity > 0) {
+          reason = "NEVER_SOLD";
+          sortKey = 1_000_000;
+        }
+      } else if (
+        daysSinceLastSale !== null &&
+        daysSinceLastSale > INSIGHTS_THRESHOLDS.STALE_DAYS_NO_SALES
+      ) {
+        reason = "NO_SALES_60D";
+        sortKey = 500_000 + daysSinceLastSale;
+      } else if (
+        monthsOfCoverage !== null &&
+        monthsOfCoverage > INSIGHTS_THRESHOLDS.STALE_MONTHS_COVERAGE
+      ) {
+        reason = "HIGH_COVERAGE";
+        sortKey = monthsOfCoverage;
+      }
+
+      if (reason) {
+        stale.push({
+          productId: p.id,
+          name: p.name,
+          sku: p.sku,
+          stockQuantity: p.stockQuantity,
+          stockValue: p.stockQuantity * Number(p.costPrice),
+          daysSinceLastSale,
+          monthsOfCoverage,
+          reason,
+          _sortKey: sortKey,
+        });
+      }
+    }
+
+    stale.sort((a, b) => b._sortKey - a._sortKey);
+
+    const totalStockValue = stale.reduce((sum, p) => sum + p.stockValue, 0);
+    const items = stale
+      .slice(0, INSIGHTS_THRESHOLDS.CARD_STALE_LIMIT)
+      .map(({ _sortKey: _, ...rest }) => rest);
+
+    return {
+      items,
+      totalCount: stale.length,
+      totalStockValue,
+      hasIntegrationActive,
+      hasData: stale.length > 0,
+    };
   }
 }
