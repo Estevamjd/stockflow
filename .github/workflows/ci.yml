@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master, develop]
+
+# Cancela runs antigas no mesmo branch quando um novo push chega
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality-gate:
+    name: Lint + Typecheck + Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # Variáveis de ambiente fake só para o build passar.
+    # NUNCA colocar secrets reais aqui — usar GitHub Secrets se precisar.
+    env:
+      DATABASE_URL: "postgresql://user:pass@localhost:5432/stockflow_ci"
+      DIRECT_URL: "postgresql://user:pass@localhost:5432/stockflow_ci"
+      NEXTAUTH_SECRET: "ci-fake-secret-not-used-anywhere-real"
+      NEXTAUTH_URL: "http://localhost:3000"
+      NEXT_PUBLIC_APP_URL: "http://localhost:3000"
+      BILLING_PROVIDER: "manual"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npx prisma generate
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build

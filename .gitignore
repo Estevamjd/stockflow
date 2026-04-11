@@ -29,6 +29,7 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+*.log
 
 # env files (can opt-in for committing if needed)
 .env*
@@ -38,4 +39,12 @@ yarn-error.log*
 
 # typescript
 *.tsbuildinfo
-next-env.d.ts
+# next-env.d.ts é gerado mas DEVE ser comitado (Next.js exige).
+# Removido do gitignore na limpeza do Bloco 1.7.
+
+# dump local de análise (não vai para o repo)
+projeto_completo_para_analise.txt
+
+# script local de setup com credencial hardcoded — usar prisma/seed.ts
+prisma/full-setup.js
+
