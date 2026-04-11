@@ -316,18 +316,23 @@ model IntegrationConfig {
 }
 
 model WebhookEvent {
-  id           String    @id @default(cuid())
-  tenantId     String
-  source       String
-  eventType    String
-  payload      Json
-  status       String    @default("received")
-  errorMessage String?   @db.Text
-  processedAt  DateTime?
-  createdAt    DateTime  @default(now())
+  id              String    @id @default(cuid())
+  tenantId        String
+  source          String
+  /// ID estável do evento na origem (Shopee ordersn, hash do payload, etc).
+  /// Usado para idempotência: dois POSTs com mesmo (source, externalEventId)
+  /// retornam 200 sem criar duplicata. Nullable porque eventos legados não têm.
+  externalEventId String?
+  eventType       String
+  payload         Json
+  status          String    @default("received")
+  errorMessage    String?   @db.Text
+  processedAt     DateTime?
+  createdAt       DateTime  @default(now())
 
   tenant Tenant @relation(fields: [tenantId], references: [id])
 
+  @@unique([source, externalEventId])
   @@index([tenantId])
   @@index([source])
   @@index([status])
@@ -420,22 +425,26 @@ enum BillingEventType {
 
 model BillingEvent {
   id          String           @id @default(cuid())
-  tenantId    String
+  tenantId    String?          // null para eventos sem tenant resolvido (ex: MP webhook bruto)
   type        BillingEventType
   gateway     String           // 'stripe' | 'mercadopago' | 'manual'
-  externalId  String?          // ID do evento no gateway
+  /// ID do evento NA ORIGEM (event.id do Stripe, request-id do MP, etc).
+  /// Usado como chave de idempotência: dois eventos com mesmo (gateway,
+  /// externalId) são tratados como o mesmo evento. Nullable apenas para
+  /// eventos manuais/legados.
+  externalId  String?
   amount      Decimal?         @db.Decimal(10,2)
   currency    String           @default("BRL")
   status      String           @default("received")
-  payload     Json?            // Payload raw do gateway
+  payload     Json?            // Payload sanitizado (whitelist), nunca cru
   processedAt DateTime?
   createdAt   DateTime         @default(now())
 
-  tenant Tenant @relation(fields: [tenantId], references: [id])
+  tenant Tenant? @relation(fields: [tenantId], references: [id])
 
+  @@unique([gateway, externalId])
   @@index([tenantId])
   @@index([type])
-  @@index([gateway, externalId])
   @@index([createdAt])
 }
 

@@ -170,24 +170,39 @@ export class ProductService {
     const salePrice = data.salePrice ?? Number(existing.salePrice);
     const profitMargin = calculateProfitMargin(costPrice, salePrice);
 
-    const product = await prisma.product.update({
-      where: { id },
-      data: {
-        ...(data.name ? { name: data.name } : {}),
-        ...(data.sku ? { sku: data.sku } : {}),
-        ...(data.categoryId !== undefined ? { categoryId: data.categoryId } : {}),
-        ...(data.description !== undefined ? { description: data.description } : {}),
-        ...(data.costPrice !== undefined ? { costPrice: data.costPrice } : {}),
-        ...(data.salePrice !== undefined ? { salePrice: data.salePrice } : {}),
-        ...(data.minStockLevel !== undefined ? { minStockLevel: data.minStockLevel } : {}),
-        ...(data.stockQuantity !== undefined ? { stockQuantity: data.stockQuantity } : {}),
-        ...(data.unit ? { unit: data.unit } : {}),
-        profitMargin,
-      },
+    // Defense in depth: o updateMany inclui tenantId no WHERE, garantindo
+    // que mesmo num cenário hipotético de TOCTOU entre o findFirst acima
+    // e este update, o tenantId do registro não pode ter mudado.
+    const updateData = {
+      ...(data.name ? { name: data.name } : {}),
+      ...(data.sku ? { sku: data.sku } : {}),
+      ...(data.categoryId !== undefined ? { categoryId: data.categoryId } : {}),
+      ...(data.description !== undefined ? { description: data.description } : {}),
+      ...(data.costPrice !== undefined ? { costPrice: data.costPrice } : {}),
+      ...(data.salePrice !== undefined ? { salePrice: data.salePrice } : {}),
+      ...(data.minStockLevel !== undefined ? { minStockLevel: data.minStockLevel } : {}),
+      ...(data.stockQuantity !== undefined ? { stockQuantity: data.stockQuantity } : {}),
+      ...(data.unit ? { unit: data.unit } : {}),
+      profitMargin,
+    };
+
+    const updated = await prisma.product.updateMany({
+      where: { id, tenantId, deletedAt: null },
+      data: updateData,
+    });
+    if (updated.count === 0) {
+      throw new AppError("Produto não encontrado", 404, ErrorCodes.NOT_FOUND);
+    }
+
+    const product = await prisma.product.findFirst({
+      where: { id, tenantId },
       include: {
         category: { select: { id: true, name: true, color: true } },
       },
     });
+    if (!product) {
+      throw new AppError("Produto não encontrado", 404, ErrorCodes.NOT_FOUND);
+    }
 
     await prisma.activityLog.create({
       data: {
@@ -213,15 +228,14 @@ export class ProductService {
     tenantId: string,
     userId?: string
   ): Promise<void> {
-    const existing = await prisma.product.findFirst({
+    // updateMany com tenantId no where: defense in depth.
+    const result = await prisma.product.updateMany({
       where: { id, tenantId, deletedAt: null },
-    });
-    if (!existing) throw new AppError("Produto não encontrado", 404, ErrorCodes.NOT_FOUND);
-
-    await prisma.product.update({
-      where: { id },
       data: { deletedAt: new Date(), status: "INACTIVE" },
     });
+    if (result.count === 0) {
+      throw new AppError("Produto não encontrado", 404, ErrorCodes.NOT_FOUND);
+    }
 
     await prisma.activityLog.create({
       data: {

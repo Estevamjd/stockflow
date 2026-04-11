@@ -45,9 +45,10 @@ export class InventoryService {
         },
       });
 
-      // Atualizar produto: estoque e custo médio
-      await tx.product.update({
-        where: { id: data.productId },
+      // Atualizar produto: estoque e custo médio.
+      // updateMany com tenantId no where: defense in depth.
+      const upd = await tx.product.updateMany({
+        where: { id: data.productId, tenantId, deletedAt: null },
         data: {
           stockQuantity: { increment: data.quantity },
           costPrice: newCMP,
@@ -59,6 +60,9 @@ export class InventoryService {
               : 0,
         },
       });
+      if (upd.count === 0) {
+        throw new AppError("Produto não encontrado", 404, ErrorCodes.NOT_FOUND);
+      }
 
       // Log
       await tx.activityLog.create({

@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { ProductService } from "@/services/product.service";
 import { requireTenant } from "@/lib/tenant";
-import { handleApiError } from "@/lib/guards";
+import { handleApiError, requireCan } from "@/lib/guards";
 import { checkProductLimit } from "@/lib/plans";
 import { z } from "zod";
 
@@ -23,6 +23,7 @@ export async function GET(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
     const tenantId = requireTenant(session);
+    requireCan(session, "product", "read");
     const { searchParams } = req.nextUrl;
 
     const filters = {
@@ -51,6 +52,7 @@ export async function POST(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
     const tenantId = requireTenant(session);
+    requireCan(session, "product", "create");
     const userId = (session?.user as { id?: string })?.id;
 
     // Verificar limite do plano

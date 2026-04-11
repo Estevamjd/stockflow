@@ -6,6 +6,7 @@ import bcrypt from "bcryptjs";
 import prisma from "@/lib/db";
 import { slugify } from "@/lib/utils";
 import { logger } from "@/lib/logger";
+import { rateLimit } from "@/lib/rate-limit";
 
 /**
  * Configuração do NextAuth.
@@ -36,11 +37,24 @@ export const authOptions: NextAuthOptions = {
         email: { label: "Email", type: "email" },
         password: { label: "Senha", type: "password" },
       },
-      async authorize(credentials) {
+      async authorize(credentials, req) {
         // Mensagem de erro genérica em todos os caminhos para não
         // diferenciar "email não existe" de "senha errada" — isso
         // bloqueia enumeração de usuários.
         const GENERIC_ERROR = "Email ou senha inválidos";
+
+        // Rate limit por IP: máximo 10 tentativas/5min.
+        // O `req` recebido aqui é um IncomingMessage (Node), não Request.
+        // Usamos um shim com Headers para o getClientIp funcionar.
+        const ip =
+          (req?.headers?.["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim() ||
+          (req?.headers?.["x-real-ip"] as string | undefined) ||
+          "unknown";
+        const rateKey = `login:${ip}`;
+        const rl = rateLimit.check(rateKey, { limit: 10, windowMs: 5 * 60_000 });
+        if (!rl.allowed) {
+          throw new Error("Muitas tentativas. Tente novamente em alguns minutos.");
+        }
 
         if (!credentials?.email || !credentials?.password) {
           throw new Error(GENERIC_ERROR);
@@ -66,6 +80,11 @@ export const authOptions: NextAuthOptions = {
         if (!isValid) {
           throw new Error(GENERIC_ERROR);
         }
+
+        // Login bem-sucedido: zera o contador para esse IP, senão um
+        // usuário legítimo que errou 9x e acertou na 10x leva timeout
+        // por ter "queimado" o slot.
+        rateLimit.reset(rateKey);
 
         // Log apenas o ID interno — nunca email/role/tenantId em mensagem.
         // O resto do fluxo segue via JWT.

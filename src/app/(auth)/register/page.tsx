@@ -22,8 +22,12 @@ export default function RegisterPage() {
       toast.error("As senhas não coincidem");
       return;
     }
-    if (formData.password.length < 6) {
-      toast.error("A senha deve ter pelo menos 6 caracteres");
+    if (formData.password.length < 10) {
+      toast.error("A senha deve ter pelo menos 10 caracteres");
+      return;
+    }
+    if (!/[A-Za-z]/.test(formData.password) || !/[0-9]/.test(formData.password)) {
+      toast.error("A senha deve conter pelo menos uma letra e um dígito");
       return;
     }
 
@@ -100,7 +104,7 @@ export default function RegisterPage() {
                 type={showPassword ? "text" : "password"}
                 value={formData.password}
                 onChange={(e) => setFormData((prev) => ({ ...prev, password: e.target.value }))}
-                placeholder="Mínimo 6 caracteres"
+                placeholder="Mínimo 10 chars, letra + número"
                 required
                 className={`${inputClass} pr-10`}
               />

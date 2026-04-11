@@ -5,6 +5,7 @@ import { getTenantByShopId } from "@/lib/tenant";
 import type { WebhookPayload } from "@/lib/shopee/types";
 import { logger } from "@/lib/logger";
 import { planEnforcer } from "@/lib/plans/plan-enforcer";
+import { applyRateLimit } from "@/lib/rate-limit";
 import { Prisma } from "@prisma/client";
 
 /**
@@ -46,6 +47,10 @@ function verifyShopeeSignature(
 }
 
 export async function POST(req: NextRequest) {
+  // Rate limit por IP: Shopee é re-tentadora, mas 100/min é sobra suficiente.
+  const limited = applyRateLimit("webhook-shopee", req, { limit: 100, windowMs: 60_000 });
+  if (limited) return limited as NextResponse;
+
   const webhookSecret = process.env.SHOPEE_WEBHOOK_SECRET;
   if (!webhookSecret) {
     logger.error("SHOPEE_WEBHOOK_SECRET ausente — recusando webhooks Shopee");
@@ -104,22 +109,41 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // ─── Idempotência ────────────────────────────────────────────
+  // Shopee retenta agressivamente. Calculamos um externalEventId estável
+  // a partir do ordersn (quando presente) ou de um hash do payload bruto.
+  // Se já existe um WebhookEvent com mesmo (source, externalEventId),
+  // respondemos 200 sem criar duplicata.
+  const externalEventId =
+    parsedPayload.data?.ordersn ??
+    crypto.createHash("sha256").update(rawPayload).digest("hex");
+
   try {
     await planEnforcer.checkIntegrationLimit(tenantId);
 
-    await prisma.webhookEvent.create({
-      data: {
+    // Upsert por (source, externalEventId): cria se novo, ignora se já existe.
+    // Usamos upsert em vez de create + try/catch P2002 para evitar warning de
+    // unique violation no log.
+    await prisma.webhookEvent.upsert({
+      where: {
+        source_externalEventId: { source: "SHOPEE", externalEventId },
+      },
+      create: {
         tenantId,
         source: "SHOPEE",
+        externalEventId,
         eventType: String(parsedPayload.code ?? "unknown"),
         payload: parsedPayload as unknown as Prisma.InputJsonValue,
         status: "PENDING",
       },
+      update: {
+        // No-op: já temos esse evento; só registramos um log estruturado.
+      },
     });
 
     logger.info(
-      { tenantId, code: parsedPayload.code },
-      "[Shopee Webhook] Evento enfileirado"
+      { tenantId, code: parsedPayload.code, externalEventId },
+      "[Shopee Webhook] Evento enfileirado (ou ignorado se duplicado)"
     );
   } catch (err) {
     logger.error({ err, tenantId }, "[Shopee Webhook] Erro ao enfileirar evento");

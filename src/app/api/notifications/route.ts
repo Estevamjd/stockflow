@@ -3,12 +3,13 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { NotificationService } from "@/services/notification.service";
 import { requireTenant } from "@/lib/tenant";
-import { handleApiError } from "@/lib/guards";
+import { handleApiError, requireCan } from "@/lib/guards";
 
 export async function GET(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
     const tenantId = requireTenant(session);
+    requireCan(session, "notification", "read");
     const { searchParams } = req.nextUrl;
     const unreadOnly = searchParams.get("unread") === "true";
     const page = parseInt(searchParams.get("page") ?? "1");

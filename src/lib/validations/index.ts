@@ -1,5 +1,21 @@
 import { z } from "zod";
 
+/**
+ * Senha mínima do StockFlow:
+ *   - 10 caracteres ou mais
+ *   - Pelo menos uma letra
+ *   - Pelo menos um dígito
+ *
+ * Mais forte que o NIST mínimo (8) sem entrar em complexidade exagerada
+ * que prejudica UX. Senhas hardcoded em seeds (`demo123456`, `admin123456`)
+ * passam por essa regra propositalmente para o seed continuar funcionando.
+ */
+export const passwordSchema = z
+  .string()
+  .min(10, "Senha deve ter pelo menos 10 caracteres")
+  .regex(/[A-Za-z]/, "Senha deve conter pelo menos uma letra")
+  .regex(/[0-9]/, "Senha deve conter pelo menos um dígito");
+
 export const productSchema = z.object({
   name: z.string().min(2, "Nome deve ter pelo menos 2 caracteres"),
   sku: z.string().min(1, "SKU é obrigatório"),
@@ -35,7 +51,7 @@ export const userSchema = z.object({
   name: z.string().min(2).optional(),
   email: z.string().email(),
   role: z.enum(["OWNER", "ADMIN", "MEMBER", "VIEWER"]),
-  password: z.string().min(6).optional(),
+  password: passwordSchema.optional(),
 });
 
 export const tenantSchema = z.object({

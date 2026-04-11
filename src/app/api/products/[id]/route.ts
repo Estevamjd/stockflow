@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { ProductService } from "@/services/product.service";
 import { requireTenant } from "@/lib/tenant";
-import { handleApiError } from "@/lib/guards";
+import { handleApiError, requireCan } from "@/lib/guards";
 import { z } from "zod";
 
 const updateProductSchema = z.object({
@@ -27,6 +27,7 @@ export async function GET(
     const { id } = await params;
     const session = await getServerSession(authOptions);
     const tenantId = requireTenant(session);
+    requireCan(session, "product", "read");
     const product = await ProductService.getProductById(id, tenantId);
     if (!product) {
       return NextResponse.json({ success: false, error: "Produto não encontrado" }, { status: 404 });
@@ -45,6 +46,7 @@ export async function PUT(
   try {
     const session = await getServerSession(authOptions);
     const tenantId = requireTenant(session);
+    requireCan(session, "product", "update");
     const userId = (session?.user as { id?: string })?.id;
 
     const body = await req.json();
@@ -81,6 +83,7 @@ export async function DELETE(
   try {
     const session = await getServerSession(authOptions);
     const tenantId = requireTenant(session);
+    requireCan(session, "product", "delete");
     const userId = (session?.user as { id?: string })?.id;
 
     const { id } = await params;

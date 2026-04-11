@@ -4,15 +4,21 @@ import bcrypt from "bcryptjs";
 import prisma from "@/lib/db";
 import { slugify } from "@/lib/utils";
 import { SubscriptionService } from "@/services/subscription.service";
+import { passwordSchema } from "@/lib/validations";
+import { applyRateLimit } from "@/lib/rate-limit";
 import { z } from "zod";
 
 const registerSchema = z.object({
   name: z.string().min(1, "Nome é obrigatório"),
   email: z.string().email("Email inválido"),
-  password: z.string().min(6, "Senha deve ter pelo menos 6 caracteres"),
+  password: passwordSchema,
 });
 
 export async function POST(req: NextRequest) {
+  // Rate limit: máximo 5 registros por IP por hora.
+  const limited = applyRateLimit("register", req, { limit: 5, windowMs: 60 * 60 * 1000 });
+  if (limited) return limited as NextResponse;
+
   try {
     const body = await req.json();
     const parsed = registerSchema.safeParse(body);

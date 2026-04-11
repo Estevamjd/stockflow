@@ -61,8 +61,12 @@ export default async function AdminBillingPage() {
                     <div className="text-[10px] font-black text-slate-400 uppercase tracking-tighter">ID: {evt.id.substring(0,8)}</div>
                   </td>
                   <td className="px-10 py-6">
-                    <div className="font-black text-slate-900 group-hover:text-indigo-600 transition-colors uppercase tracking-tight">{evt.tenant.name}</div>
-                    <div className="text-[10px] font-bold text-slate-400 italic lowercase">{evt.tenant.slug}</div>
+                    <div className="font-black text-slate-900 group-hover:text-indigo-600 transition-colors uppercase tracking-tight">
+                      {evt.tenant?.name ?? "— Sem tenant —"}
+                    </div>
+                    <div className="text-[10px] font-bold text-slate-400 italic lowercase">
+                      {evt.tenant?.slug ?? "(órfão)"}
+                    </div>
                   </td>
                   <td className="px-10 py-6">
                     <Badge variant="outline" className="font-black text-[9px] tracking-widest px-2 py-0.5 rounded-md uppercase border-slate-200 bg-white">

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
+import prisma from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { applyRateLimit } from "@/lib/rate-limit";
 
 /**
  * Webhook do MercadoPago.
@@ -59,6 +61,10 @@ interface MpWebhookBody {
 }
 
 export async function POST(req: NextRequest) {
+  // Rate limit por IP: 60/min é folgado para o MP retentar burst.
+  const limited = applyRateLimit("webhook-mercadopago", req, { limit: 60, windowMs: 60_000 });
+  if (limited) return limited as NextResponse;
+
   const secret = process.env.MERCADOPAGO_WEBHOOK_SECRET;
   if (!secret) {
     logger.error("MERCADOPAGO_WEBHOOK_SECRET ausente — recusando webhooks MP");
@@ -96,21 +102,50 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
 
-  // TODO (Fase 3): resolver tenant via API do MP usando data.id → payment → metadata.tenantId
-  // Por enquanto, não temos como mapear o evento a um tenant sem chamar a API,
-  // então gravamos em uma tabela "global" de webhooks para auditoria/retry.
+  // ─── Persistência ────────────────────────────────────────────
+  // Não temos como mapear o evento a um tenant sem chamar a API do MP
+  // (data.id → payment → metadata.tenantId). O processamento completo
+  // entra na Fase 3. Mas NÃO podemos descartar — perder eventos de
+  // pagamento é perder dinheiro real.
   //
-  // Como BillingEvent exige tenantId, e não queremos contaminar nenhum tenant,
-  // logamos e respondemos 200 — o evento será re-processado quando o fluxo
-  // completo for implementado (cron com retry de eventos sem tenant).
+  // Estratégia: gravar em BillingEvent com tenantId=null + idempotência
+  // por (gateway, externalId=requestId). Quando a Fase 3 ativar a integração,
+  // um job de reconciliação processa esses eventos órfãos.
+  try {
+    await prisma.billingEvent.upsert({
+      where: {
+        gateway_externalId: { gateway: "mercadopago", externalId: requestId },
+      },
+      create: {
+        tenantId: null, // resolvido depois pelo job da Fase 3
+        type: "PAYMENT_SUCCEEDED", // placeholder até parsear o evento real
+        gateway: "mercadopago",
+        externalId: requestId,
+        status: "received",
+        // Payload sanitizado: só os metadados essenciais, não o body completo
+        payload: {
+          action: body.action ?? null,
+          type: body.type ?? null,
+          dataId: String(dataId),
+        },
+      },
+      update: {
+        // No-op: já recebemos esse evento. MP retentou.
+      },
+    });
 
-  logger.info(
-    { requestId, dataId, action: body.action, type: body.type },
-    "[MercadoPago Webhook] Evento válido recebido (processamento na Fase 3)"
-  );
-
-  // Marca como recebido em uma futura tabela (a criar na Fase 3).
-  // Por ora, log estruturado é suficiente para auditoria.
+    logger.info(
+      { requestId, dataId, action: body.action, type: body.type },
+      "[MercadoPago Webhook] Evento enfileirado para processamento da Fase 3"
+    );
+  } catch (err) {
+    logger.error(
+      { err, requestId, dataId },
+      "[MercadoPago Webhook] Erro ao persistir evento"
+    );
+    // 500 → MP retenta automaticamente.
+    return NextResponse.json({ error: "Internal error" }, { status: 500 });
+  }
 
   return NextResponse.json({ received: true }, { status: 200 });
 }

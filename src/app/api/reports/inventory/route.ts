@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { ReportService } from "@/services/report.service";
 import { requireTenant } from "@/lib/tenant";
-import { handleApiError } from "@/lib/guards";
+import { handleApiError, requireCan } from "@/lib/guards";
 import { planEnforcer } from "@/lib/plans/plan-enforcer";
 import Papa from "papaparse";
 
@@ -11,6 +11,7 @@ export async function GET(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
     const tenantId = requireTenant(session);
+    requireCan(session, "report", "read");
     const format = req.nextUrl.searchParams.get("format") ?? "json";
 
     await planEnforcer.checkFeatureAccess(tenantId, 'reports');

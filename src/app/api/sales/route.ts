@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { SaleService } from "@/services/sale.service";
 import { requireTenant } from "@/lib/tenant";
-import { handleApiError } from "@/lib/guards";
+import { handleApiError, requireCan } from "@/lib/guards";
 import { z } from "zod";
 
 const saleItemSchema = z.object({
@@ -29,6 +29,7 @@ export async function GET(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
     const tenantId = requireTenant(session);
+    requireCan(session, "sale", "read");
     const { searchParams } = req.nextUrl;
 
     const result = await SaleService.getSales(tenantId, {
@@ -56,6 +57,7 @@ export async function POST(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
     const tenantId = requireTenant(session);
+    requireCan(session, "sale", "create");
     const userId = (session?.user as { id?: string })?.id;
 
     const body = await req.json();

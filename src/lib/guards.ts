@@ -26,6 +26,64 @@ export function requireRole(session: Session | null, minRole: UserRole): void {
   }
 }
 
+/**
+ * Matriz de permissões resource × action × role.
+ *
+ * Convenções:
+ *  - VIEWER: leitura geral. Não cria, não edita, não deleta.
+ *  - MEMBER: leitura + criação/edição de produto/venda/estoque (operacional do dia).
+ *  - ADMIN:  tudo de MEMBER + delete + alterar settings + alterar plano.
+ *  - OWNER:  tudo de ADMIN + ações de tenant (delete tenant, transferir).
+ *  - SUPERADMIN: roda em escopo SaaS, separado (gateado pelo proxy.ts).
+ *
+ * Adicionar uma nova permissão = adicionar entrada aqui. Não duplicar
+ * lista de roles em lugar nenhum.
+ */
+const PERMISSIONS: Record<string, Record<string, UserRole[]>> = {
+  product: {
+    read: ["VIEWER", "MEMBER", "ADMIN", "OWNER"],
+    create: ["MEMBER", "ADMIN", "OWNER"],
+    update: ["MEMBER", "ADMIN", "OWNER"],
+    delete: ["ADMIN", "OWNER"],
+  },
+  category: {
+    read: ["VIEWER", "MEMBER", "ADMIN", "OWNER"],
+    create: ["MEMBER", "ADMIN", "OWNER"],
+    update: ["MEMBER", "ADMIN", "OWNER"],
+    delete: ["ADMIN", "OWNER"],
+  },
+  sale: {
+    read: ["VIEWER", "MEMBER", "ADMIN", "OWNER"],
+    create: ["MEMBER", "ADMIN", "OWNER"],
+    update: ["ADMIN", "OWNER"],
+    delete: ["OWNER"],
+  },
+  inventory: {
+    read: ["VIEWER", "MEMBER", "ADMIN", "OWNER"],
+    create: ["MEMBER", "ADMIN", "OWNER"],
+    update: ["ADMIN", "OWNER"],
+    delete: ["OWNER"],
+  },
+  notification: {
+    read: ["VIEWER", "MEMBER", "ADMIN", "OWNER"],
+    update: ["VIEWER", "MEMBER", "ADMIN", "OWNER"], // marcar como lida
+  },
+  report: {
+    read: ["MEMBER", "ADMIN", "OWNER"],
+  },
+  settings: {
+    read: ["ADMIN", "OWNER"],
+    update: ["OWNER"],
+  },
+  subscription: {
+    read: ["MEMBER", "ADMIN", "OWNER"],
+    update: ["ADMIN", "OWNER"], // checkout, mudar plano
+  },
+  plan: {
+    read: ["VIEWER", "MEMBER", "ADMIN", "OWNER"],
+  },
+};
+
 export function canAccessResource(
   session: Session | null,
   resource: { resource: string; action: string }
@@ -33,39 +91,34 @@ export function canAccessResource(
   if (!session?.user) return false;
   const role = (session.user as { role?: UserRole }).role ?? "VIEWER";
 
-  const permissions: Record<string, Record<string, UserRole[]>> = {
-    product: {
-      read: ["VIEWER", "MEMBER", "ADMIN", "OWNER"],
-      create: ["MEMBER", "ADMIN", "OWNER"],
-      update: ["MEMBER", "ADMIN", "OWNER"],
-      delete: ["ADMIN", "OWNER"],
-    },
-    sale: {
-      read: ["VIEWER", "MEMBER", "ADMIN", "OWNER"],
-      create: ["MEMBER", "ADMIN", "OWNER"],
-      update: ["ADMIN", "OWNER"],
-      delete: ["OWNER"],
-    },
-    inventory: {
-      read: ["VIEWER", "MEMBER", "ADMIN", "OWNER"],
-      create: ["MEMBER", "ADMIN", "OWNER"],
-      update: ["ADMIN", "OWNER"],
-      delete: ["OWNER"],
-    },
-    report: {
-      read: ["MEMBER", "ADMIN", "OWNER"],
-    },
-    settings: {
-      read: ["ADMIN", "OWNER"],
-      update: ["OWNER"],
-    },
-  };
+  // SUPERADMIN passa em qualquer permission de tenant (mas gateado em
+  // outras camadas para não acessar tenants alheios sem propósito).
+  if (role === "SUPERADMIN") return true;
 
-  const resourcePerms = permissions[resource.resource];
+  const resourcePerms = PERMISSIONS[resource.resource];
   if (!resourcePerms) return false;
   const actionPerms = resourcePerms[resource.action];
   if (!actionPerms) return false;
   return actionPerms.includes(role);
+}
+
+/**
+ * Versão "throwable" de canAccessResource — para uso direto em handlers
+ * de API. Lança AppError 401/403 que o handleApiError mapeia.
+ */
+export function requireCan(
+  session: Session | null,
+  resource: string,
+  action: string
+): void {
+  requireAuth(session);
+  if (!canAccessResource(session, { resource, action })) {
+    throw new AppError(
+      `Sem permissão para ${action} em ${resource}`,
+      403,
+      ErrorCodes.FORBIDDEN
+    );
+  }
 }
 
 export function handleApiError(error: unknown): { status: number; message: string; code: string } {
