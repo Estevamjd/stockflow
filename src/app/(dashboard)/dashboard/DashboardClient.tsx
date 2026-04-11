@@ -10,6 +10,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { NotificationType } from "@prisma/client";
 import { OnboardingChecklist } from "@/components/ui/OnboardingChecklist";
+import { ProfitRankingCard } from "./ProfitRankingCard";
+import { StaleProductsCard } from "./StaleProductsCard";
+import type { ProfitRanking, StaleProductsReport } from "@/types/insights";
 
 const RevenueChart = dynamic(() => import("./RevenueChart"), {
   ssr: false,
@@ -108,12 +111,15 @@ interface Props {
   recentNotifications: Notification[];
   topProducts?: { name: string; sku: string; totalSold: number; totalRevenue: number }[];
   stockEntryCount?: number;
+  profitRanking: ProfitRanking;
+  staleProducts: StaleProductsReport;
 }
 
 export function DashboardClient({
   salesStats, inventoryStats, totalProducts, chartData, channelData,
   recentSales, lowStockProducts, recentNotifications,
   stockEntryCount = 0, totalSales = 0,
+  profitRanking, staleProducts,
 }: Props) {
   const router = useRouter();
 
@@ -266,6 +272,12 @@ export function DashboardClient({
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Linha 3 — Insights inteligentes (Bloco 1 da Fase 2) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <ProfitRankingCard data={profitRanking} />
+        <StaleProductsCard data={staleProducts} />
       </div>
     </div>
   );
