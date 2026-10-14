@@ -1,8 +1,22 @@
 # StockFlow — Controle de Estoque e Vendas SaaS
 
-![StockFlow](https://via.placeholder.com/1200x600?text=StockFlow+-+SaaS)
+![Dashboard do StockFlow](docs/screenshots/dashboard.png)
 
 Um sistema SaaS moderno para pequenos vendedores e empreendedores focado no controle de estoque e vendas, com integração automática para a Shopee.
+
+## 🎯 O problema
+
+Quem vende em loja física e na Shopee ao mesmo tempo costuma controlar estoque em planilha e descobrir tarde que um produto acabou ou que vendeu sem ter. O StockFlow centraliza produtos, entradas e vendas, baixa o estoque automaticamente quando chega um pedido da Shopee e avisa quando algo está acabando.
+
+> Projeto pessoal de portfólio. A integração com a Shopee pode ser testada no **Modo de Simulação**, sem credenciais reais.
+
+## 📸 Telas
+
+| Produtos | Vendas | Relatórios |
+|---|---|---|
+| ![Produtos](docs/screenshots/products.png) | ![Vendas](docs/screenshots/sales.png) | ![Relatórios](docs/screenshots/reports.png) |
+| **Integrações** | **Notificações** | |
+| ![Integrações](docs/screenshots/integrations.png) | ![Notificações](docs/screenshots/notifications.png) | |
 
 ## ✨ Funcionalidades Principais
 
@@ -31,7 +45,7 @@ Um sistema SaaS moderno para pequenos vendedores e empreendedores focado no cont
 
 ### 1. Clonar o repositório
 ```bash
-git clone https://github.com/SeuUsuario/stockflow.git
+git clone https://github.com/Estevamjd/stockflow.git
 cd stockflow
 ```
 
@@ -45,11 +59,14 @@ pnpm install
 ```
 
 ### 3. Configurar variáveis de ambiente
-Faça uma cópia do arquivo `.env.example` para `.env` e preencha com as suas informações:
+Crie um arquivo `.env` na raiz. O mínimo para rodar localmente:
 ```bash
-cp .env.example .env
+DATABASE_URL="postgresql://usuario:senha@localhost:5432/stockflow"
+NEXTAUTH_SECRET="gere-um-valor-aleatorio"
+NEXTAUTH_URL="http://localhost:3000"
+NEXT_PUBLIC_APP_URL="http://localhost:3000"
 ```
-_Nota: Certifique-se de preencher corretamente a string de conexão do `DATABASE_URL` e configurar o `NEXTAUTH_SECRET`._
+_Opcionais: `SHOPEE_*` (integração real), `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`, `STRIPE_*`/`MERCADOPAGO_WEBHOOK_SECRET` (planos), `WHATSAPP_PROVIDER`/`EVOLUTION_*`/`CALLMEBOT_API_KEY` (alertas por WhatsApp) e `CRON_SECRET`. Nunca faça commit do `.env`._
 
 ### 4. Configurar e Semear o Banco de Dados
 A aplicação utiliza Prisma como ORM. Siga os comandos abaixo para criar as tabelas e povoar informações iniciais de demonstração.
@@ -75,4 +92,14 @@ O StockFlow possui suporte para webhook da Shopee:
 - Em produção, configure a URL gerada (por exemplo `https://seusite.com/api/webhooks/shopee`) dentro do seu console de vendedor da plataforma Shopee/Partner com as devidas chaves colocadas no arquivo `.env`.
 
 ***
+## 🧪 Qualidade
+
+```bash
+npm run ci   # lint + typecheck + testes (Vitest) + build
+```
+
+## 👤 Autor
+
+Feito por **Estevam Juliano** — [LinkedIn](https://www.linkedin.com/in/estevam-juliano-8799b026b/) · [GitHub](https://github.com/Estevamjd)
+
 _Construído para escalar pequenos varejos do mundo físico e digital._
